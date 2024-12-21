@@ -1,11 +1,14 @@
 import numpy as np
 import warp as wp
 
-
+import matplotlib
+import matplotlib.animation as anim
+import matplotlib.pyplot as plt
+matplotlib.use('TkAgg')
 
 dt = wp.constant(1/60)
-width = wp.constant(640)
-height = wp.constant(640)
+width = wp.constant(320)
+height = wp.constant(320)
 
 
 @wp.func
@@ -85,7 +88,8 @@ def pressure_step(p: wp.array2d(dtype=float),
 def advect(u_prev: wp.array2d(dtype=wp.vec2),
            u: wp.array2d(dtype=wp.vec2),
            s_prev: wp.array2d(dtype=wp.vec3),
-           s: wp.array2d(dtype=wp.vec3)):
+           s: wp.array2d(dtype=wp.vec3),
+           occ_grid: wp.array2d(dtype=wp.vec3)):
     # Get the current thread index
     i, j = wp.tid()
      
@@ -130,46 +134,52 @@ def divergence(u: wp.array2d(dtype=wp.vec2), div: wp.array2d(dtype=float)):
     div[i, j] = dx + dy
     
 @wp.kernel
-def sources(scalar_field: wp.array2d(dtype=wp.vec3), velocity_field: wp.array2d(dtype=wp.vec2), radius: int, dir: wp.vec2):
+def sources(scalar_field: wp.array2d(dtype=wp.vec3), velocity_field: wp.array2d(dtype=wp.vec2), radius: int, dir: wp.vec2, sim_time: float):
     i, j = wp.tid()
-
+    
+    color_multiplier = sim_time - wp.floor(sim_time) 
     top_source = wp.sqrt(wp.pow(float(i - (width - 20)), 2.0) + wp.pow(float(j - (height - 20)), 2.0))
     bottom_source = wp.length(wp.vec2(float(i - 20), float(j - 20)))
     
     if top_source < (radius + 3):
-        scalar_field[i, j] = wp.vec3(0.0, 0.0, 1.0)
+        scalar_field[i, j] = wp.vec3((1.0-color_multiplier), 0.0, color_multiplier)
         velocity_field[i, j] = dir
         
     if bottom_source < radius:
-        scalar_field[i, j] = wp.vec3(1.0, 0.0, 0.0)
+        scalar_field[i, j] = wp.vec3(color_multiplier, 0.0, (1.0-color_multiplier))
         velocity_field[i, j] = -dir
         
 class Fluid():
-    def __init__(self):
+    def __init__(self, occ_grid):
         self.width = width
         self.height = height
         self.size = (height, width)
         self.u = wp.zeros(self.size, dtype=wp.vec2)
         self.u_prev = wp.zeros(self.size, dtype=wp.vec2)
+        
+        #self.s = wp.array(data=occ_grid, dtype=wp.vec3)
+        #self.s_prev = wp.array(data=occ_grid, dtype=wp.vec3)
         self.s = wp.zeros(self.size, dtype=wp.vec3)
         self.s_prev = wp.zeros(self.size, dtype=wp.vec3)
+        
         self.p = wp.zeros(self.size, dtype=float)
         self.p_prev = wp.zeros(self.size, dtype=float)
         self.div = wp.zeros(self.size, dtype=float)
         
-        self.occ_grip = wp.zeros(self.size, dtype=bool)
+        self.occ_grid = wp.array(data=occ_grid, dtype=wp.vec3)
         
         self.sim_time = 0.0
+        self.color_time = 0.0
 
     def step(self):
-        for i in range(2):
+        for i in range(4):
             shape = (self.width, self.height)
 
             speed = 500.0
             angle = 4.0
             vel = wp.vec2(np.cos(angle) * speed, np.sin(angle) * speed)
 
-            wp.launch(sources, dim=shape, inputs=[self.s, self.u, 10, vel])
+            wp.launch(sources, dim=shape, inputs=[self.s, self.u, 10, vel, self.color_time])
 
             wp.launch(external_forces, dim=shape, inputs=[self.u, self.s, dt/2])
             wp.launch(divergence, dim=shape, inputs=[self.u, self.div])
@@ -177,43 +187,37 @@ class Fluid():
             self.p.zero_()
             self.p_prev.zero_()
 
-            for j in range(400):
+            for j in range(200):
                 wp.launch(pressure_step, dim=shape, inputs=[self.p, self.p_prev, self.div])
                 (self.p, self.p_prev) = (self.p_prev, self.p)
                 
             wp.launch(pressure_apply, dim=shape, inputs=[self.p, self.u])
 
-            wp.launch(advect, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev])
+            wp.launch(advect, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
             (self.u, self.u_prev) = (self.u_prev, self.u)
             (self.s, self.s_prev) = (self.s_prev, self.s)
 
             self.sim_time += dt
 
+        self.color_time += 0.02
+
     def step_and_render_frame(self, frame_num=None, img=None):
         self.step()
 
         if img:
-            img.set_array(self.s.numpy())
+            render = self.s.numpy() + self.occ_grid.numpy()
+            img.set_array(render)
 
         return (img,)
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--device", type=str, default=None, help="Override the default Warp device.")
-    parser.add_argument("--num_frames", type=int, default=100000, help="Total number of frames.")
-
-    args = parser.parse_known_args()[0]
-
-    #with wp.ScopedDevice(args.device):
-    fluid = Fluid()
-
-    import matplotlib
-    import matplotlib.animation as anim
-    import matplotlib.pyplot as plt
-
+    occ_grid = np.load('occ_grid.npy')/256.0
+    occ_grid[:,:,1] = occ_grid[:,:,0] 
+    occ_grid[:,:,2] = occ_grid[:,:,0] 
+    occ_grid[...] = 0
+    fluid = Fluid(occ_grid)
+    
     fig = plt.figure()
 
     img = plt.imshow(
@@ -227,7 +231,6 @@ if __name__ == "__main__":
         fig,
         fluid.step_and_render_frame,
         fargs=(img,),
-        frames=args.num_frames,
         blit=True,
         interval=8,
         repeat=False,

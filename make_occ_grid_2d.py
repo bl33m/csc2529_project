@@ -4,11 +4,11 @@ import numpy as np
 from PIL import Image, ImageTk
 
 class ImageColoringApp:
-    def __init__(self, root, image_width=500, image_height=500):
+    def __init__(self, root, image_width=320, image_height=320):
         self.root = root
         self.image_width = image_width
         self.image_height = image_height
-        self.image = Image.new("RGB", (self.image_width, self.image_height), "white")  # Start with a blank white image
+        self.image = Image.new("RGB", (self.image_width, self.image_height), "black")  # Start with a blank white image
         self.pixels = np.array(self.image)  # Convert to NumPy array to keep track of changes
         
         # Canvas to display the image
