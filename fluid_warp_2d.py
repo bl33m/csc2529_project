@@ -99,6 +99,32 @@ def advect(u_prev: wp.array2d(dtype=wp.vec2),
     u[i, j] = get_prev_velocity(u_prev, prev_pos)
     s[i, j] = get_prev_particle(s_prev, prev_pos)
 
+# Advection step
+@wp.kernel
+def diffuse(u_prev: wp.array2d(dtype=wp.vec2),
+           u: wp.array2d(dtype=wp.vec2),
+           s_prev: wp.array2d(dtype=wp.vec3),
+           s: wp.array2d(dtype=wp.vec3),
+           occ_grid: wp.array2d(dtype=wp.vec3)):
+    # Get the current thread index
+    i, j = wp.tid()
+    a = dt*0.4*float(height*width)
+    # Get the previous position
+    prev_pos = wp.vec2(float(i), float(j)) - u_prev[i, j]*dt*0.5
+
+    s0 = get_particle_w_bnd(s_prev, i - 1, j)
+    s1 = get_particle_w_bnd(s_prev, i + 1, j)
+    s2 = get_particle_w_bnd(s_prev, i, j - 1)
+    s3 = get_particle_w_bnd(s_prev, i, j + 1)
+
+    s[i,j] = (s_prev[i, j] + a*(s0 + s1 + s2 + s3))/(1.0 + 4.0*a)
+    
+    u0 = get_vel_w_bnd(u_prev, i - 1, j)
+    u1 = get_vel_w_bnd(u_prev, i + 1, j)
+    u2 = get_vel_w_bnd(u_prev, i, j - 1)
+    u3 = get_vel_w_bnd(u_prev, i, j + 1)
+    
+    u[i,j] = (u_prev[i, j] + a*(u0 + u1 + u2 + u3))/(1.0 + 4.0*a)
 
 @wp.kernel
 def external_forces(velocity_field: wp.array2d(dtype=wp.vec2), scalar_field: wp.array2d(dtype=wp.vec3), dt: float):
@@ -139,15 +165,26 @@ def sources(scalar_field: wp.array2d(dtype=wp.vec3), velocity_field: wp.array2d(
     
     color_multiplier = sim_time - wp.floor(sim_time) 
     top_source = wp.sqrt(wp.pow(float(i - (width - 20)), 2.0) + wp.pow(float(j - (height - 20)), 2.0))
-    bottom_source = wp.length(wp.vec2(float(i - 20), float(j - 20)))
+    top_right = wp.sqrt(wp.pow(float(i - (width - 20)), 2.0) + wp.pow(float(j -  20), 2.0))
     
-    if top_source < (radius + 3):
+    bottom_left = wp.sqrt(wp.pow(float(i - 20), 2.0) + wp.pow(float(j - (height - 20)), 2.0))
+    bottom_right = wp.length(wp.vec2(float(i - 20), float(j - 20)))
+    
+    if top_source < (radius):
         scalar_field[i, j] = wp.vec3((1.0-color_multiplier), 0.0, color_multiplier)
         velocity_field[i, j] = dir
         
-    if bottom_source < radius:
+    if top_right < (radius):
+        scalar_field[i, j] = wp.vec3(0.0, color_multiplier, (1.0-color_multiplier))
+        velocity_field[i, j] = wp.vec2(dir[0], -dir[1])
+        
+    if bottom_right < radius:
         scalar_field[i, j] = wp.vec3(color_multiplier, 0.0, (1.0-color_multiplier))
         velocity_field[i, j] = -dir
+        
+    if bottom_left < radius:
+        scalar_field[i, j] = wp.vec3((1.0-color_multiplier), color_multiplier, 0.0)
+        velocity_field[i, j] = wp.vec2(-dir[0], dir[1])
         
 class Fluid():
     def __init__(self, occ_grid):
@@ -175,19 +212,21 @@ class Fluid():
         for i in range(4):
             shape = (self.width, self.height)
 
-            speed = 500.0
-            angle = 4.0
+            speed = 500.0*(self.sim_time - wp.floor(self.sim_time))
+            angle = 5*np.pi/4
             vel = wp.vec2(np.cos(angle) * speed, np.sin(angle) * speed)
 
             wp.launch(sources, dim=shape, inputs=[self.s, self.u, 10, vel, self.color_time])
 
             wp.launch(external_forces, dim=shape, inputs=[self.u, self.s, dt/2])
             wp.launch(divergence, dim=shape, inputs=[self.u, self.div])
-
+            
+            for i in range(100):
+                wp.launch(diffuse, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
             self.p.zero_()
             self.p_prev.zero_()
 
-            for j in range(200):
+            for j in range(500):
                 wp.launch(pressure_step, dim=shape, inputs=[self.p, self.p_prev, self.div])
                 (self.p, self.p_prev) = (self.p_prev, self.p)
                 
