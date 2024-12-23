@@ -18,4 +18,4 @@ To run the 2D example:
 `python3 fluid_warp_2d.py`
 
 ## Example Output
-![output](demo.png "Demo of the solver")
+![output](output.png "Demo of the solver")
