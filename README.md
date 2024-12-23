@@ -16,3 +16,6 @@ Parameters of the sim can be changed in the config.yaml file.
 The main operators of the stable fluids algorithm are implemented with warp kernels so they can run on the GPU. We solve for the pressure and viscosity using an iterative Gauss-Sidel solver for the 2D example. We also use no-slip boundary conditions for obstacles. 
 To run the 2D example:
 `python3 fluid_warp_2d.py`
+
+## Example Output
+![output](demo.png "Demo of the solver")
