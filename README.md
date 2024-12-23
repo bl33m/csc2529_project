@@ -5,6 +5,10 @@ This is an implementation of Jos Stam's stable fluids [paper](https://pages.cs.w
 To install dependencies, use
 `pip install -r requirements.txt`.
 
+You can use the 
+`python3 make_occ_grid.py`
+to create custom static obstacles in the fluid field.
+
 ## Implementation Details
 
 The main operators of the stable fluids algorithm are implemented with warp kernels so they can run on the GPU. We solve for the pressure and viscosity using an iterative Gauss-Sidel solver for the 2D example. 
