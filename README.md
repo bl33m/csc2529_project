@@ -7,7 +7,7 @@ To install dependencies, use
 
 You can use the 
 `python3 make_occ_grid.py`
-to create custom static obstacles in the fluid field.
+to create custom static obstacles in the fluid field. We have a demo occ_grid.npy file included in the repo.
 
 ## Implementation Details
 
