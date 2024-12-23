@@ -2,12 +2,13 @@ import tkinter as tk
 from tkinter import Button, Canvas, filedialog
 import numpy as np
 from PIL import Image, ImageTk
+import yaml
 
 class ImageColoringApp:
-    def __init__(self, root, image_width=640, image_height=640):
+    def __init__(self, root, config):
         self.root = root
-        self.image_width = image_width
-        self.image_height = image_height
+        self.image_width = config['height']
+        self.image_height = config['width']
         self.image = Image.new("RGB", (self.image_width, self.image_height), "black")  # Start with a blank white image
         self.pixels = np.array(self.image)  # Convert to NumPy array to keep track of changes
         
@@ -24,7 +25,7 @@ class ImageColoringApp:
         self.canvas.bind("<B1-Motion>", self.on_drag)  # Click and drag to draw
         
         # Buttons to change color, clear the image, and save the file
-        self.color = (255, 0, 0)  # Default color is red
+        self.color = (255, 255, 255)
         
         self.red_button = Button(root, text="Red", bg="red", command=lambda: self.set_color((255, 0, 0)))
         self.red_button.pack(side="left")
@@ -92,5 +93,8 @@ class ImageColoringApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    with open("config.yaml", "r") as file:
+        config = yaml.safe_load(file)
+        
     app = ImageColoringApp(root)
     root.mainloop()

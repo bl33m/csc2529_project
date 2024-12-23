@@ -4,12 +4,44 @@ import warp as wp
 import matplotlib
 import matplotlib.animation as anim
 import matplotlib.pyplot as plt
+import yaml
 matplotlib.use('TkAgg')
 
-dt = wp.constant(1/60)
-width = wp.constant(640)
-height = wp.constant(640)
 
+@wp.kernel
+def pressure_step(p: wp.array2d(dtype=float), 
+                   p_prev: wp.array2d(dtype=float), 
+                   div: wp.array2d(dtype=float)):
+    
+    i, j = wp.tid()
+
+    p0 = get_pressure_w_bnd(p_prev, i - 1, j)
+    p1 = get_pressure_w_bnd(p_prev, i + 1, j)
+    p2 = get_pressure_w_bnd(p_prev, i, j - 1)
+    p3 = get_pressure_w_bnd(p_prev, i, j + 1)
+
+    p[i,j] = (p0 + p1 + p2 + p3 - div[i, j])*0.25
+
+
+# Advection step
+@wp.kernel
+def advect(u_prev: wp.array2d(dtype=wp.vec2),
+           u: wp.array2d(dtype=wp.vec2),
+           s_prev: wp.array2d(dtype=wp.vec3),
+           s: wp.array2d(dtype=wp.vec3),
+           occ_grid: wp.array2d(dtype=wp.vec3)):
+    # Get the current thread index
+    i, j = wp.tid()
+     
+    # Get the previous position
+    prev_pos = wp.vec2(float(i), float(j)) - u_prev[i, j]*dt*0.5
+
+    if wp.length(occ_grid[i, j]) > 0.0:
+        u[i, j] = wp.vec2(0.0, 0.0)
+        s[i, j] = wp.vec3(0.0, 0.0, 0.0)
+        return
+    u[i, j] = get_prev_velocity(u_prev, prev_pos)
+    s[i, j] = get_prev_particle(s_prev, prev_pos)
 
 @wp.func
 def get_particle_w_bnd(s: wp.array2d(dtype=wp.vec3), ix: int, iy: int):
@@ -25,9 +57,9 @@ def get_pressure_w_bnd(s: wp.array2d(dtype=float), ix: int, iy: int):
 
 @wp.func
 def get_vel_w_bnd(u: wp.array2d(dtype=wp.vec2), ix: int, iy: int):
-    if ix < 0 or ix >= width:
+    if ix < 0 or ix > width:
         return wp.vec2(0.0, 0.0)
-    if iy < 0 or iy >= height:
+    if iy < 0 or iy > height:
         return wp.vec2(0.0, 0.0)
     return u[ix, iy]
 
@@ -68,42 +100,7 @@ def get_prev_particle(u: wp.array2d(dtype=wp.vec3), prev_pos: wp.vec2):
     z2 = wp.lerp(ptx0y1, ptx1y1, dx)
     return wp.lerp(z1, z2, dy)
 
-@wp.kernel
-def pressure_step(p: wp.array2d(dtype=float), 
-                   p_prev: wp.array2d(dtype=float), 
-                   div: wp.array2d(dtype=float)):
-    
-    i, j = wp.tid()
-
-    p0 = get_pressure_w_bnd(p_prev, i - 1, j)
-    p1 = get_pressure_w_bnd(p_prev, i + 1, j)
-    p2 = get_pressure_w_bnd(p_prev, i, j - 1)
-    p3 = get_pressure_w_bnd(p_prev, i, j + 1)
-
-    p[i,j] = (p0 + p1 + p2 + p3 - div[i, j])*0.25
-
-
-# Advection step
-@wp.kernel
-def advect(u_prev: wp.array2d(dtype=wp.vec2),
-           u: wp.array2d(dtype=wp.vec2),
-           s_prev: wp.array2d(dtype=wp.vec3),
-           s: wp.array2d(dtype=wp.vec3),
-           occ_grid: wp.array2d(dtype=wp.vec3)):
-    # Get the current thread index
-    i, j = wp.tid()
-     
-    # Get the previous position
-    prev_pos = wp.vec2(float(i), float(j)) - u_prev[i, j]*dt*0.5
-
-    if wp.length(occ_grid[i, j]) > 0.0:
-        u[i, j] = wp.vec2(0.0, 0.0)
-        s[i, j] = wp.vec3(0.0, 0.0, 0.0)
-        return
-    u[i, j] = get_prev_velocity(u_prev, prev_pos)
-    s[i, j] = get_prev_particle(s_prev, prev_pos)
-
-# Advection step
+# solve for viscosity 
 @wp.kernel
 def diffuse(u_prev: wp.array2d(dtype=wp.vec2),
            u: wp.array2d(dtype=wp.vec2),
@@ -114,17 +111,17 @@ def diffuse(u_prev: wp.array2d(dtype=wp.vec2),
     i, j = wp.tid()
     a = dt*0.4*float(height*width)
 
-    s0 = get_particle_w_bnd(s_prev, i - 1, j)
-    s1 = get_particle_w_bnd(s_prev, i + 1, j)
-    s2 = get_particle_w_bnd(s_prev, i, j - 1)
-    s3 = get_particle_w_bnd(s_prev, i, j + 1)
+    s0 = get_particle_w_bnd(s_prev, i-1, j)
+    s1 = get_particle_w_bnd(s_prev, i+1, j)
+    s2 = get_particle_w_bnd(s_prev, i, j-1)
+    s3 = get_particle_w_bnd(s_prev, i, j+1)
 
     s[i,j] = (s_prev[i, j] + a*(s0 + s1 + s2 + s3))/(1.0 + 4.0*a)
     
-    u0 = get_vel_w_bnd(u_prev, i - 1, j)
-    u1 = get_vel_w_bnd(u_prev, i + 1, j)
-    u2 = get_vel_w_bnd(u_prev, i, j - 1)
-    u3 = get_vel_w_bnd(u_prev, i, j + 1)
+    u0 = get_vel_w_bnd(u_prev, i-1, j)
+    u1 = get_vel_w_bnd(u_prev, i+1, j)
+    u2 = get_vel_w_bnd(u_prev, i, j-1)
+    u3 = get_vel_w_bnd(u_prev, i, j+1)
     
     u[i,j] = (u_prev[i, j] + a*(u0 + u1 + u2 + u3))/(1.0 + 4.0*a)
 
@@ -142,7 +139,7 @@ def pressure_apply(p: wp.array2d(dtype=float), u: wp.array2d(dtype=wp.vec2)):
         return
     if j == 0 or j == height - 1:
         return
-    f_p = wp.vec2(p[i + 1, j] - p[i - 1, j], p[i, j + 1] - p[i, j - 1]) * 0.5
+    f_p = wp.vec2(p[i+1, j] - p[i-1, j], p[i, j+1] - p[i, j-1]) * 0.5
 
     u[i, j] = u[i, j] - f_p
 
@@ -150,14 +147,21 @@ def pressure_apply(p: wp.array2d(dtype=float), u: wp.array2d(dtype=wp.vec2)):
 @wp.kernel
 def divergence(u: wp.array2d(dtype=wp.vec2), div: wp.array2d(dtype=float)):
     i, j = wp.tid()
-
-    if i == width - 1:
-        return
-    if j == height - 1:
-        return
-
-    dx = (u[i + 1, j][0] - u[i, j][0]) * 0.5
-    dy = (u[i, j + 1][1] - u[i, j][1]) * 0.5
+    #if i == width - 1:
+    #    u[i+1, j][0] = -1.0*u[i, j][0]
+    #    return
+    #if j == height - 1:
+    #    u[i, j+1][1] = -1.0*u[i, j][1]
+    #    return
+    #if i == 1:
+    #    u[i-1, j][0] = -1.0*u[i, j][0]
+    #    return
+    #if j == 1:
+    #    u[i, j-1][1] = -1.0*u[i, j][1]
+    #    return
+    
+    dx = 0.5 * (u[i+1, j][0] - u[i, j][0])
+    dy = 0.5 * (u[i, j+1][1] - u[i, j][1])
 
     div[i, j] = dx + dy
     
@@ -189,10 +193,11 @@ def sources(scalar_field: wp.array2d(dtype=wp.vec3), velocity_field: wp.array2d(
         velocity_field[i, j] = wp.vec2(-dir[0], dir[1])
         
 class Fluid():
-    def __init__(self, occ_grid):
+    def __init__(self, occ_grid, config):
         self.width = width
         self.height = height
         self.size = (height, width)
+        self.config = config
         self.u = wp.zeros(self.size, dtype=wp.vec2)
         self.u_prev = wp.zeros(self.size, dtype=wp.vec2)
         
@@ -203,7 +208,7 @@ class Fluid():
         
         self.p = wp.zeros(self.size, dtype=float)
         self.p_prev = wp.zeros(self.size, dtype=float)
-        self.div = wp.zeros(self.size, dtype=float)
+        self.divergence = wp.zeros(self.size, dtype=float)
         
         self.occ_grid = wp.array(data=occ_grid, dtype=wp.vec3)
         
@@ -225,15 +230,16 @@ class Fluid():
             wp.launch(sources, dim=shape, inputs=[self.s, self.u, 10, vel, self.color_time])
 
             wp.launch(external_forces, dim=shape, inputs=[self.u, self.s, dt/2])
-            wp.launch(divergence, dim=shape, inputs=[self.u, self.div])
+            wp.launch(divergence, dim=shape, inputs=[self.u, self.divergence])
             
-            for i in range(100):
+            for i in range(self.config['visc_iter']):
                 wp.launch(diffuse, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
+                
             self.p.zero_()
             self.p_prev.zero_()
 
-            for j in range(500):
-                wp.launch(pressure_step, dim=shape, inputs=[self.p, self.p_prev, self.div])
+            for j in range(self.config['pressure_iter']):
+                wp.launch(pressure_step, dim=shape, inputs=[self.p, self.p_prev, self.divergence])
                 (self.p, self.p_prev) = (self.p_prev, self.p)
                 
             wp.launch(pressure_apply, dim=shape, inputs=[self.p, self.u])
@@ -252,9 +258,20 @@ class Fluid():
 
 
 if __name__ == "__main__":
-    occ_grid = np.load('occ_grid.npy')/256.0
     
-    fluid = Fluid(occ_grid)
+    with open("config.yaml", "r") as file:
+        config = yaml.safe_load(file)
+    
+    if config['obstacles']:
+        occ_grid = np.load('occ_grid.npy')/255.0
+    else:
+        occ_grid = np.zeros((config['width'], config['height'], 3))
+        
+    dt = wp.constant(1.0/config['dt'])
+    width = wp.constant(config['width'])
+    height = wp.constant(config['height'])
+    
+    fluid = Fluid(occ_grid, config)
     
     fig = plt.figure()
 
@@ -273,5 +290,5 @@ if __name__ == "__main__":
         interval=8,
         repeat=False,
     )
-
+        
     plt.show()

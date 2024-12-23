@@ -1,0 +1,6 @@
+dt: 60.0
+height: 640
+width: 640
+pressure_iter: 500
+visc_iter: 50
+obstacles: true
