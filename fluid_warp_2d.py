@@ -216,18 +216,18 @@ class Fluid():
         self.color_time = 0.0
 
     def step(self):
+        speed = 500.0*(self.sim_time - wp.floor(self.sim_time))
+        angle = np.deg2rad(225)
+        vel = wp.vec2(np.cos(angle)*speed, np.sin(angle)*speed)
+        jet_rad = 10
         for i in range(4):
             shape = (self.width, self.height)
 
             wp.launch(advect, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
             (self.u, self.u_prev) = (self.u_prev, self.u)
             (self.s, self.s_prev) = (self.s_prev, self.s)
-            
-            speed = 500.0*(self.sim_time - wp.floor(self.sim_time))
-            angle = 5*np.pi/4
-            vel = wp.vec2(np.cos(angle) * speed, np.sin(angle) * speed)
 
-            wp.launch(sources, dim=shape, inputs=[self.s, self.u, 10, vel, self.color_time])
+            wp.launch(sources, dim=shape, inputs=[self.s, self.u, jet_rad, vel, self.color_time])
 
             wp.launch(external_forces, dim=shape, inputs=[self.u, self.s, dt/2])
             wp.launch(divergence, dim=shape, inputs=[self.u, self.divergence])
@@ -235,15 +235,14 @@ class Fluid():
             for i in range(self.config['visc_iter']):
                 wp.launch(diffuse, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
                 
-            self.p.zero_()
-            self.p_prev.zero_()
+            self.p = wp.zeros(self.size, dtype=float)
+            self.p_prev = wp.zeros(self.size, dtype=float)
 
             for j in range(self.config['pressure_iter']):
                 wp.launch(pressure_step, dim=shape, inputs=[self.p, self.p_prev, self.divergence])
                 (self.p, self.p_prev) = (self.p_prev, self.p)
                 
             wp.launch(pressure_apply, dim=shape, inputs=[self.p, self.u])
-
             self.sim_time += dt
 
         self.color_time += 0.02
