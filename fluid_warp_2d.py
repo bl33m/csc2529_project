@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
 dt = wp.constant(1/60)
-width = wp.constant(320)
-height = wp.constant(320)
+width = wp.constant(640)
+height = wp.constant(640)
 
 
 @wp.func
@@ -96,6 +96,10 @@ def advect(u_prev: wp.array2d(dtype=wp.vec2),
     # Get the previous position
     prev_pos = wp.vec2(float(i), float(j)) - u_prev[i, j]*dt*0.5
 
+    if wp.length(occ_grid[i, j]) > 0.0:
+        u[i, j] = wp.vec2(0.0, 0.0)
+        s[i, j] = wp.vec3(0.0, 0.0, 0.0)
+        return
     u[i, j] = get_prev_velocity(u_prev, prev_pos)
     s[i, j] = get_prev_particle(s_prev, prev_pos)
 
@@ -109,8 +113,6 @@ def diffuse(u_prev: wp.array2d(dtype=wp.vec2),
     # Get the current thread index
     i, j = wp.tid()
     a = dt*0.4*float(height*width)
-    # Get the previous position
-    prev_pos = wp.vec2(float(i), float(j)) - u_prev[i, j]*dt*0.5
 
     s0 = get_particle_w_bnd(s_prev, i - 1, j)
     s1 = get_particle_w_bnd(s_prev, i + 1, j)
@@ -212,6 +214,10 @@ class Fluid():
         for i in range(4):
             shape = (self.width, self.height)
 
+            wp.launch(advect, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
+            (self.u, self.u_prev) = (self.u_prev, self.u)
+            (self.s, self.s_prev) = (self.s_prev, self.s)
+            
             speed = 500.0*(self.sim_time - wp.floor(self.sim_time))
             angle = 5*np.pi/4
             vel = wp.vec2(np.cos(angle) * speed, np.sin(angle) * speed)
@@ -232,10 +238,6 @@ class Fluid():
                 
             wp.launch(pressure_apply, dim=shape, inputs=[self.p, self.u])
 
-            wp.launch(advect, dim=shape, inputs=[self.u, self.u_prev, self.s, self.s_prev, self.occ_grid])
-            (self.u, self.u_prev) = (self.u_prev, self.u)
-            (self.s, self.s_prev) = (self.s_prev, self.s)
-
             self.sim_time += dt
 
         self.color_time += 0.02
@@ -243,18 +245,15 @@ class Fluid():
     def step_and_render_frame(self, frame_num=None, img=None):
         self.step()
 
-        if img:
-            render = self.s.numpy() + self.occ_grid.numpy()
-            img.set_array(render)
+        render = self.s.numpy() + self.occ_grid.numpy()
+        img.set_array(render)
 
         return (img,)
 
 
 if __name__ == "__main__":
     occ_grid = np.load('occ_grid.npy')/256.0
-    occ_grid[:,:,1] = occ_grid[:,:,0] 
-    occ_grid[:,:,2] = occ_grid[:,:,0] 
-    occ_grid[...] = 0
+    
     fluid = Fluid(occ_grid)
     
     fig = plt.figure()

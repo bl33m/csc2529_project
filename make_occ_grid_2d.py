@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 class ImageColoringApp:
-    def __init__(self, root, image_width=320, image_height=320):
+    def __init__(self, root, image_width=640, image_height=640):
         self.root = root
         self.image_width = image_width
         self.image_height = image_height
@@ -33,6 +33,9 @@ class ImageColoringApp:
         self.green_button.pack(side="left")
         
         self.blue_button = Button(root, text="Blue", bg="blue", command=lambda: self.set_color((0, 0, 255)))
+        self.blue_button.pack(side="left")
+        
+        self.blue_button = Button(root, text="White", bg="White", command=lambda: self.set_color((255, 255, 255)))
         self.blue_button.pack(side="left")
         
         self.clear_button = Button(root, text="Clear", command=self.clear_image)
@@ -76,15 +79,15 @@ class ImageColoringApp:
         self.canvas.itemconfig(self.canvas_image, image=self.tk_image)
     
     def clear_image(self):
-        """Clears the image by filling it with white."""
-        self.pixels = np.ones((self.image_height, self.image_width, 3), dtype=np.uint8) * 255  # White image
+        self.pixels = np.zeros((self.image_height, self.image_width, 3), dtype=np.uint8)
         self.update_image()
     
     def save_as_numpy_array(self):
         """Saves the image as a .npy file."""
-        file_path = filedialog.asksaveasfilename(defaultextension=".npy", filetypes=[("NumPy Array", "*.npy")])
+        file_path = 'occ_grid.npy'
         if file_path:
-            np.save(file_path, self.pixels)
+            img = self.pixels[::-1, :, :]
+            np.save(file_path, img)
             print(f"Image saved as NumPy array at: {file_path}")
 
 if __name__ == "__main__":
